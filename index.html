@@ -268,9 +268,21 @@ A1栋24层西南玻璃门无法自动开启已上报
     return mx;
   }
 
+  // 位置词（园区里不按楼栋编号、直接用位置称呼的区域），作为楼栋识别
+  var LOCATION_WORDS = ['园区','裙楼','裙搂','食堂','大门','南门','北门','东门','西门','门岗','岗亭','广场','停车场','地下室','负层','大堂','大厅','报告厅','咖啡厅','健身房','会议室区'];
   function parseLine(line){
+    // 1) A+数字 楼栋（A1、A10栋、A3A9A7）
     var m = line.match(/^(?:A\d{1,2}栋?)+/);
     if(m){ return {building:m[0], content:line.slice(m[0].length).trim()}; }
+    // 2) 位置词作为楼栋（园区、裙楼、食堂…）
+    for(var i=0;i<LOCATION_WORDS.length;i++){
+      var w = LOCATION_WORDS[i];
+      var idx = line.indexOf(w);
+      if(idx===0){  // 位置词必须在行首，才算楼栋
+        return {building:w, content:line.slice(w.length).trim()};
+      }
+    }
+    // 3) 都不是，楼栋留空
     return {building:'', content:line.trim()};
   }
   function inferResult(content){
