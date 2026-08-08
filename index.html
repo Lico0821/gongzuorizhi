@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作日志填写系统</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Microsoft YaHei","PingFang SC",sans-serif; background:#f0f4f8; color:#333; padding:16px; }
+  .container { max-width:800px; margin:0 auto; }
+  h1 { font-size:22px; text-align:center; color:#1a3c6e; margin-bottom:4px; }
+  .subtitle { text-align:center; color:#888; font-size:13px; margin-bottom:18px; }
+  .card { background:#fff; border-radius:12px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,.08); margin-bottom:16px; }
+  .colhead { font-size:14px; font-weight:bold; color:#1a3c6e; margin-bottom:10px; }
+  label { display:block; font-size:13px; color:#555; margin-bottom:6px; }
+  input,select,textarea { width:100%; padding:10px 12px; font-size:15px; border:1px solid #ccd4e0; border-radius:8px; font-family:inherit; outline:none; margin-bottom:12px; }
+  textarea { resize:vertical; min-height:90px; }
+  .btn { width:100%; padding:13px; font-size:16px; font-weight:bold; background:#4472c4; color:#fff; border:none; border-radius:8px; cursor:pointer; }
+  .btn:hover { background:#3a63b0; }
+  .btn.green { background:#2e7d32; }
+  .btn.orange { background:#e67e22; }
+  .btn.gray { background:#7f8c8d; }
+  .toast { position:fixed; top:20px; left:50%; transform:translateX(-50%); background:#2e7d32; color:#fff; padding:12px 22px; border-radius:8px; font-size:15px; box-shadow:0 4px 12px rgba(0,0,0,.2); opacity:0; transition:opacity .3s; z-index:99; pointer-events:none; }
+  .toast.show { opacity:1; }
+  .tip { font-size:12px; color:#999; margin-top:8px; text-align:center; }
+  .table-wrap { overflow-x:auto; background:#fff; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  table { width:100%; border-collapse:collapse; font-size:12px; min-width:600px; }
+  th,td { border:1px solid #e0e4ec; padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:#4472c4; color:#fff; white-space:nowrap; }
+  .file-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .file-bar .fname { flex:1; min-width:180px; font-size:13px; color:#333; background:#f5f7fa; padding:8px 12px; border-radius:8px; word-break:break-all; }
+  .hidden { display:none; }
+  .row2 { display:flex; gap:10px; }
+  .row2 > div { flex:1; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>工作日志填写系统</h1>
+  <div class="subtitle">阳光电源习友路园区 · 工程维修记录（网页版）</div>
+
+  <!-- 数据文件管理 -->
+  <div class="card">
+    <div class="colhead">📂 数据文件</div>
+    <div class="file-bar">
+      <span class="fname" id="fname">尚未加载文件</span>
+      <button class="btn gray" style="width:auto; padding:8px 14px; font-size:13px; margin:0;" onclick="document.getElementById('openFile').click()">打开 Excel</button>
+      <button class="btn orange" style="width:auto; padding:8px 14px; font-size:13px; margin:0;" onclick="downloadExcel()">下载 Excel</button>
+    </div>
+    <input type="file" id="openFile" accept=".xlsx,.xlsm" class="hidden" onchange="openFile(this)">
+    <div class="tip" style="text-align:left; margin-top:8px;">💡 上传或打开一个 Excel，记录会加进去；下载保存到手机。</div>
+    <div class="tip" style="text-align:left;">⚠️ 本页数据存在当前手机浏览器里，清缓存或换手机会丢失，请常下载 Excel 备份。</div>
+  </div>
+
+  <!-- 批量填写 -->
+  <div class="card">
+    <div class="colhead">📋 方式一：批量粘贴一整天</div>
+    <textarea id="batch" placeholder="粘贴一整天的记录：
+
+7月22日
+A3A9A7查看进水管管径尺寸大小
+A10栋1层西南角男卫第三个门脱落已修复
+A1栋24层西南玻璃门无法自动开启已上报
+
+第一行写日期，下面每行一条；楼栋、处理结果自动识别。"></textarea>
+    <button class="btn green" onclick="submitBatch()">⚡ 一键保存</button>
+  </div>
+
+  <!-- 单条填写 -->
+  <div class="card">
+    <div class="colhead">📝 方式二：单条填写</div>
+    <div class="row2">
+      <div><label>楼栋</label><input type="text" id="building" placeholder="如 A1 / A6"></div>
+      <div><label>报修日期</label><input type="date" id="date"></div>
+    </div>
+    <label>报修内容</label>
+    <textarea id="content" placeholder="如：18层西电梯口防火门闭门器坏需更换已上报"></textarea>
+    <div class="row2">
+      <div><label>完成时间</label><input type="text" id="done_time" placeholder="留空同报修日期"></div>
+      <div><label>处理结果</label>
+        <select id="result">
+          <option value="已处理">已处理</option>
+          <option value="处理中">处理中</option>
+          <option value="已上报">已上报</option>
+          <option value="未处理">未处理</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn" onclick="submitSingle()">保存</button>
+  </div>
+
+  <!-- 已填记录 -->
+  <div class="card">
+    <div class="colhead">📋 已填记录</div>
+    <div class="table-wrap">
+      <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    </div>
+    <div class="tip">共 <span id="count">0</span> 条</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  var wb = null;          // 当前打开的 workbook
+  var curFile = null;     // 当前文件名
+  var HEADERS = ['序号','报修日期','楼栋','报修内容','完成时间','处理结果'];
+
+  function today(){
+    var d=new Date(); var m=String(d.getMonth()+1).padStart(2,'0'); var dd=String(d.getDate()).padStart(2,'0');
+    return d.getFullYear()+'-'+m+'-'+dd;
+  }
+  document.getElementById('date').value = today();
+
+  function toast(msg, ok){
+    var t=document.getElementById('toast'); t.textContent=msg;
+    t.style.background = ok===false?'#c62828':'#2e7d32';
+    t.classList.add('show'); setTimeout(function(){t.classList.remove('show');},2200);
+  }
+
+  function newWorkbook(){
+    wb = XLSX.utils.book_new();
+    var month = today().slice(0,7).replace('-','年')+'月';
+    var data = [[], HEADERS];
+    var title = '阳光电源习友路园区'+today().slice(0,4)+'年'+parseInt(today().slice(5,7))+'月份工程维修统计表';
+    data[0][0] = title;
+    var ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [{wch:8},{wch:16},{wch:10},{wch:55},{wch:14},{wch:12}];
+    XLSX.utils.book_append_sheet(wb, ws, month);
+  }
+
+  function openFile(input){
+    var f = input.files && input.files[0]; if(!f) return;
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try{
+        wb = XLSX.read(e.target.result, {type:'array'});
+        curFile = f.name;
+        document.getElementById('fname').textContent = '📄 '+f.name+'（'+wb.SheetNames.join(', ')+'）';
+        toast('✅ 已打开 '+f.name);
+        renderTable();
+      }catch(err){ toast('❌ 打不开这个文件：'+err.message, false); }
+    };
+    reader.readAsArrayBuffer(f);
+    input.value='';
+  }
+
+  function getActiveSheet(){
+    if(!wb){ newWorkbook(); }
+    return wb.Sheets[wb.SheetNames[0]];
+  }
+
+  function sheetRows(){
+    var ws = getActiveSheet();
+    var rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+    return rows;
+  }
+
+  function maxSeq(){
+    var rows = sheetRows();
+    var mx=0;
+    for(var i=2;i<rows.length;i++){ var v=rows[i][0]; if(typeof v==='number'&&v>mx) mx=v; }
+    return mx;
+  }
+
+  // 解析一行：楼栋+内容
+  function parseLine(line){
+    var m = line.match(/^(?:A\d{1,2}栋?)+/);
+    if(m){ return {building:m[0], content:line.slice(m[0].length).trim()}; }
+    return {building:'', content:line.trim()};
+  }
+  function inferResult(content){
+    if(/已上报|已登记/.test(content)) return '已上报';
+    if(/待处理/.test(content)) return '未处理';
+    if(/处理中/.test(content)) return '处理中';
+    return '已处理';
+  }
+
+  function submitBatch(){
+    var text = document.getElementById('batch').value.trim();
+    if(!text){ toast('请先粘贴内容', false); return; }
+    var lines = text.split('\n').map(function(s){return s.trim();}).filter(function(s){return s && !s.startsWith('#');});
+    var curDate=''; var added=0;
+    var rows = sheetRows();
+    var seq = maxSeq();
+    var ws = getActiveSheet();
+    lines.forEach(function(ln){
+      var dm = ln.match(/^(\d{1,2})\s*月\s*(\d{1,2})\s*日$/);
+      if(dm){ curDate = parseInt(dm[1])+'月'+parseInt(dm[2])+'日'; return; }
+      var p = parseLine(ln);
+      var date = curDate || (today().slice(5,7)+'月'+parseInt(today().slice(8,10))+'日');
+      seq++;
+      var row = [seq, date, p.building, p.content, date, inferResult(p.content)];
+      XLSX.utils.sheet_add_aoa(ws, [row], {origin:-1});
+      added++;
+    });
+    renderTable();
+    toast('✅ 保存 '+added+' 条');
+    document.getElementById('batch').value='';
+  }
+
+  function submitSingle(){
+    var content = document.getElementById('content').value.trim();
+    if(!content){ toast('请填写报修内容', false); return; }
+    var p = parseLine(content);
+    var d = document.getElementById('date').value;
+    var date = parseInt(d.slice(5,7))+'月'+parseInt(d.slice(8,10))+'日';
+    var done = document.getElementById('done_time').value.trim() || date;
+    var building = document.getElementById('building').value.trim() || p.building;
+    var seq = maxSeq()+1;
+    var ws = getActiveSheet();
+    XLSX.utils.sheet_add_aoa(ws, [[seq, date, building, content, done, document.getElementById('result').value]], {origin:-1});
+    renderTable();
+    toast('✅ 第 '+seq+' 条 已保存');
+    document.getElementById('content').value='';
+    document.getElementById('building').value='';
+    document.getElementById('done_time').value='';
+  }
+
+  function renderTable(){
+    var rows = sheetRows();
+    var thead=document.getElementById('thead'), tbody=document.getElementById('tbody');
+    thead.innerHTML=''; tbody.innerHTML='';
+    HEADERS.forEach(function(h){ var th=document.createElement('th'); th.textContent=h; thead.appendChild(th); });
+    if(rows.length<=2){
+      var tr=document.createElement('tr'); var td=document.createElement('td');
+      td.colSpan=6; td.textContent='还没有记录，填上面表单提交即可';
+      td.style.cssText='text-align:center;color:#aaa;padding:30px;'; tr.appendChild(td); tbody.appendChild(tr);
+    } else {
+      for(var i=2;i<rows.length;i++){
+        var tr=document.createElement('tr');
+        for(var c=0;c<6;c++){ var td=document.createElement('td'); td.textContent = rows[i][c]||''; tr.appendChild(td); }
+        tbody.appendChild(tr);
+      }
+    }
+    document.getElementById('count').textContent = Math.max(0, rows.length-2);
+  }
+
+  function downloadExcel(){
+    if(!wb){ newWorkbook(); }
+    var name = curFile || '工作日志.xlsx';
+    XLSX.writeFile(wb, name);
+    toast('✅ 已下载 '+name);
+  }
+
+  // 初始：建个空表
+  newWorkbook();
+  renderTable();
+</script>
+</body>
+</html>
