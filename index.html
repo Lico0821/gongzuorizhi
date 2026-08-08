@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>工作日志填写系统</title>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: "Microsoft YaHei","PingFang SC",sans-serif; background:#f0f4f8; color:#333; padding:16px; }
@@ -33,6 +33,8 @@
   .hidden { display:none; }
   .row2 { display:flex; gap:10px; }
   .row2 > div { flex:1; }
+  .monthbar { display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+  .monthbar select { width:auto; margin:0; }
 </style>
 </head>
 <body>
@@ -49,13 +51,18 @@
       <button class="btn orange" style="width:auto; padding:8px 14px; font-size:13px; margin:0;" onclick="downloadExcel()">下载 Excel</button>
     </div>
     <input type="file" id="openFile" accept=".xlsx,.xlsm" class="hidden" onchange="openFile(this)">
-    <div class="tip" style="text-align:left; margin-top:8px;">💡 上传或打开一个 Excel，记录会加进去；下载保存到手机。</div>
+    <div class="tip" style="text-align:left; margin-top:8px;">💡 上传或打开一个 Excel，记录会加进去；下载的 Excel 保留完整漂亮格式。</div>
     <div class="tip" style="text-align:left;">⚠️ 本页数据存在当前手机浏览器里，清缓存或换手机会丢失，请常下载 Excel 备份。</div>
   </div>
 
-  <!-- 批量填写 -->
+  <!-- 月份切换 + 批量填写 -->
   <div class="card">
-    <div class="colhead">📋 方式一：批量粘贴一整天</div>
+    <div class="colhead">📋 填写工作日志</div>
+    <div class="monthbar">
+      <span style="font-size:13px; color:#555;">当前工作表：</span>
+      <select id="sheetSel" onchange="switchSheet()"></select>
+      <button class="btn gray" style="width:auto; padding:6px 12px; font-size:13px; margin:0;" onclick="addMonthSheet()">+ 新建月份表</button>
+    </div>
     <textarea id="batch" placeholder="粘贴一整天的记录：
 
 7月22日
@@ -103,8 +110,8 @@ A1栋24层西南玻璃门无法自动开启已上报
 <div class="toast" id="toast"></div>
 
 <script>
-  var wb = null;          // 当前打开的 workbook
-  var curFile = null;     // 当前文件名
+  var wb = null;
+  var curFile = null;
   var HEADERS = ['序号','报修日期','楼栋','报修内容','完成时间','处理结果'];
 
   function today(){
@@ -119,15 +126,116 @@ A1栋24层西南玻璃门无法自动开启已上报
     t.classList.add('show'); setTimeout(function(){t.classList.remove('show');},2200);
   }
 
+  // ===== 样式系统（关键：让下载的 Excel 保留漂亮格式）=====
+  var FILL_TITLE = {patternType:'solid', fgColor:{rgb:'DDEBF7'}};
+  var FILL_HEAD  = {patternType:'solid', fgColor:{rgb:'BDD7EE'}};
+  var THIN = {style:'thin', color:{rgb:'000000'}};
+  var BORDER_ALL = {top:THIN,bottom:THIN,left:THIN,right:THIN};
+
+  function styleCell(cell, opts){
+    if(!cell.s) cell.s = {};
+    var s = cell.s;
+    if(opts.fill) s.fill = opts.fill;
+    if(opts.font) s.font = opts.font;
+    if(opts.align) s.alignment = opts.align;
+    if(opts.border) s.border = opts.border;
+  }
+
+  function applySheetStyle(ws, totalRows){
+    // 标题行(第1行)
+    for(var c=1;c<=6;c++){
+      var cell = ws[XLSX.utils.encode_cell({r:0,c:c-1})];
+      if(cell) styleCell(cell, {fill:FILL_TITLE, font:{name:'微软雅黑',sz:14,bold:true}, align:{horizontal:'center',vertical:'center'}, border:BORDER_ALL});
+    }
+    // 表头行(第2行)
+    for(var c=1;c<=6;c++){
+      var cell = ws[XLSX.utils.encode_cell({r:1,c:c-1})];
+      if(cell) styleCell(cell, {fill:FILL_HEAD, font:{name:'微软雅黑',sz:10,bold:true}, align:{horizontal:'center',vertical:'center'}, border:BORDER_ALL});
+    }
+    // 数据行
+    for(var r=2; r<totalRows; r++){
+      for(var c=1;c<=6;c++){
+        var cell = ws[XLSX.utils.encode_cell({r:r,c:c-1})];
+        if(cell){
+          styleCell(cell, {font:{name:'微软雅黑',sz:10}, border:BORDER_ALL,
+            align: (c===4? {horizontal:'left',vertical:'center',wrapText:true} : {horizontal:'center',vertical:'center'})});
+        }
+      }
+    }
+    // 列宽
+    ws['!cols'] = [{wch:8},{wch:16},{wch:10},{wch:55},{wch:14},{wch:12}];
+    // 合并标题
+    if(!ws['!merges']) ws['!merges'] = [];
+    if(!ws['!merges'].some(function(m){return m.s.r===0&&m.s.c===0;})){
+      ws['!merges'].push({s:{r:0,c:0}, e:{r:0,c:5}});
+    }
+    // 说明：SheetJS 系列无法在导出时写入"冻结窗格"，
+    // 下载后在 Excel/WPS 里 视图→冻结→冻结前两行 即可（或用下方模板文件）。
+    // ws['!views']=[{state:'frozen', ySplit:2, xSplit:0, topLeftCell:'A3'}]; // 已验证无效
+  }
+
+  function refreshStyles(){
+    if(!wb) return;
+    wb.SheetNames.forEach(function(name){
+      var ws = wb.Sheets[name];
+      var ref = ws['!ref'] || 'A1';
+      var range = XLSX.utils.decode_range(ref);
+      applySheetStyle(ws, range.e.r + 1);
+    });
+  }
+
+  // ===== 工作簿操作 =====
   function newWorkbook(){
     wb = XLSX.utils.book_new();
-    var month = today().slice(0,7).replace('-','年')+'月';
-    var data = [[], HEADERS];
-    var title = '阳光电源习友路园区'+today().slice(0,4)+'年'+parseInt(today().slice(5,7))+'月份工程维修统计表';
-    data[0][0] = title;
-    var ws = XLSX.utils.aoa_to_sheet(data);
-    ws['!cols'] = [{wch:8},{wch:16},{wch:10},{wch:55},{wch:14},{wch:12}];
-    XLSX.utils.book_append_sheet(wb, ws, month);
+    addMonthSheet(today(), true);
+    curFile = '工作日志.xlsx';
+    fillSheetSelect();
+    renderTable();
+  }
+
+  function monthName(dateStr){
+    // 'YYYY-MM-DD' -> 'YYYY年M月'
+    var d = dateStr || today();
+    var y = d.slice(0,4);
+    var m = parseInt(d.slice(5,7));
+    return y+'年'+m+'月';
+  }
+
+  function sheetTitle(name){
+    // '2026年7月' -> '阳光电源习友路园区2026年7月份工程维修统计表'
+    var m = name.match(/^(\d{4})年(\d{1,2})月$/);
+    if(!m) return name;
+    return '阳光电源习友路园区'+m[1]+'年'+m[2]+'月份工程维修统计表';
+  }
+
+  function addMonthSheet(dateStr, isInit){
+    var name = monthName(dateStr || today());
+    if(wb.Sheets[name]){ toast('已存在 '+name+' 表'); return; }
+    var ws = XLSX.utils.aoa_to_sheet([[sheetTitle(name)], HEADERS]);
+    applySheetStyle(ws, 2);
+    XLSX.utils.book_append_sheet(wb, ws, name);
+    fillSheetSelect();
+    document.getElementById('sheetSel').value = name;
+    renderTable();
+    if(!isInit) toast('✅ 已新建 '+name+' 表');
+  }
+
+  function fillSheetSelect(){
+    var sel = document.getElementById('sheetSel');
+    var cur = sel.value;
+    sel.innerHTML = '';
+    wb.SheetNames.forEach(function(n){
+      var o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o);
+    });
+    if(cur && wb.SheetNames.indexOf(cur)>=0) sel.value=cur;
+    else sel.value = wb.SheetNames[0];
+  }
+
+  function switchSheet(){ renderTable(); }
+
+  function getActiveSheet(){
+    if(!wb){ newWorkbook(); }
+    return wb.Sheets[document.getElementById('sheetSel').value];
   }
 
   function openFile(input){
@@ -135,20 +243,17 @@ A1栋24层西南玻璃门无法自动开启已上报
     var reader = new FileReader();
     reader.onload = function(e){
       try{
-        wb = XLSX.read(e.target.result, {type:'array'});
+        wb = XLSX.read(e.target.result, {type:'array', cellStyles:true});
         curFile = f.name;
+        refreshStyles();  // 打开时自动补样式
         document.getElementById('fname').textContent = '📄 '+f.name+'（'+wb.SheetNames.join(', ')+'）';
-        toast('✅ 已打开 '+f.name);
+        fillSheetSelect();
         renderTable();
+        toast('✅ 已打开 '+f.name);
       }catch(err){ toast('❌ 打不开这个文件：'+err.message, false); }
     };
     reader.readAsArrayBuffer(f);
     input.value='';
-  }
-
-  function getActiveSheet(){
-    if(!wb){ newWorkbook(); }
-    return wb.Sheets[wb.SheetNames[0]];
   }
 
   function sheetRows(){
@@ -158,13 +263,11 @@ A1栋24层西南玻璃门无法自动开启已上报
   }
 
   function maxSeq(){
-    var rows = sheetRows();
-    var mx=0;
+    var rows = sheetRows(); var mx=0;
     for(var i=2;i<rows.length;i++){ var v=rows[i][0]; if(typeof v==='number'&&v>mx) mx=v; }
     return mx;
   }
 
-  // 解析一行：楼栋+内容
   function parseLine(line){
     var m = line.match(/^(?:A\d{1,2}栋?)+/);
     if(m){ return {building:m[0], content:line.slice(m[0].length).trim()}; }
@@ -177,27 +280,59 @@ A1栋24层西南玻璃门无法自动开启已上报
     return '已处理';
   }
 
+  // 根据日期自动决定写到哪个月份表
+  function sheetForDate(cnDate){
+    // '7月22日' -> '2026年7月'
+    var m = cnDate.match(/^(\d{1,2})月(\d{1,2})日$/);
+    if(!m) return document.getElementById('sheetSel').value;
+    var now = today(); var y = now.slice(0,4);
+    return y+'年'+m[1]+'月';
+  }
+
   function submitBatch(){
     var text = document.getElementById('batch').value.trim();
     if(!text){ toast('请先粘贴内容', false); return; }
     var lines = text.split('\n').map(function(s){return s.trim();}).filter(function(s){return s && !s.startsWith('#');});
     var curDate=''; var added=0;
-    var rows = sheetRows();
-    var seq = maxSeq();
-    var ws = getActiveSheet();
+    // 预扫描，按日期分组写入对应月份表
+    var pending = [];  // {date, rows[]}
+    var dateGroup = {};
     lines.forEach(function(ln){
       var dm = ln.match(/^(\d{1,2})\s*月\s*(\d{1,2})\s*日$/);
       if(dm){ curDate = parseInt(dm[1])+'月'+parseInt(dm[2])+'日'; return; }
       var p = parseLine(ln);
-      var date = curDate || (today().slice(5,7)+'月'+parseInt(today().slice(8,10))+'日');
-      seq++;
-      var row = [seq, date, p.building, p.content, date, inferResult(p.content)];
-      XLSX.utils.sheet_add_aoa(ws, [row], {origin:-1});
+      var date = curDate || (parseInt(today().slice(5,7))+'月'+parseInt(today().slice(8,10))+'日');
+      if(!dateGroup[date]) dateGroup[date] = [];
+      dateGroup[date].push({building:p.building, content:p.content, result:inferResult(p.content)});
       added++;
     });
+    // 写入对应月份表
+    Object.keys(dateGroup).forEach(function(date){
+      var sheetName = sheetForDate(date);
+      if(!wb.Sheets[sheetName]) addMonthSheetFromName(sheetName);
+      var ws = wb.Sheets[sheetName];
+      var seq = maxSeqIn(ws);
+      dateGroup[date].forEach(function(item){
+        seq++;
+        XLSX.utils.sheet_add_aoa(ws, [[seq, date, item.building, item.content, date, item.result]], {origin:-1});
+      });
+    });
+    refreshStyles();
+    fillSheetSelect();
     renderTable();
     toast('✅ 保存 '+added+' 条');
     document.getElementById('batch').value='';
+  }
+
+  function addMonthSheetFromName(name){
+    var ws = XLSX.utils.aoa_to_sheet([[sheetTitle(name)], HEADERS]);
+    applySheetStyle(ws, 2);
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  }
+  function maxSeqIn(ws){
+    var rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''}); var mx=0;
+    for(var i=2;i<rows.length;i++){ var v=rows[i][0]; if(typeof v==='number'&&v>mx) mx=v; }
+    return mx;
   }
 
   function submitSingle(){
@@ -208,11 +343,16 @@ A1栋24层西南玻璃门无法自动开启已上报
     var date = parseInt(d.slice(5,7))+'月'+parseInt(d.slice(8,10))+'日';
     var done = document.getElementById('done_time').value.trim() || date;
     var building = document.getElementById('building').value.trim() || p.building;
-    var seq = maxSeq()+1;
-    var ws = getActiveSheet();
+    var sheetName = sheetForDate(date);
+    if(!wb.Sheets[sheetName]) addMonthSheetFromName(sheetName);
+    var ws = wb.Sheets[sheetName];
+    var seq = maxSeqIn(ws)+1;
     XLSX.utils.sheet_add_aoa(ws, [[seq, date, building, content, done, document.getElementById('result').value]], {origin:-1});
+    refreshStyles();
+    fillSheetSelect();
+    document.getElementById('sheetSel').value = sheetName;
     renderTable();
-    toast('✅ 第 '+seq+' 条 已保存');
+    toast('✅ 第 '+seq+' 条 已保存到 '+sheetName);
     document.getElementById('content').value='';
     document.getElementById('building').value='';
     document.getElementById('done_time').value='';
@@ -225,7 +365,7 @@ A1栋24层西南玻璃门无法自动开启已上报
     HEADERS.forEach(function(h){ var th=document.createElement('th'); th.textContent=h; thead.appendChild(th); });
     if(rows.length<=2){
       var tr=document.createElement('tr'); var td=document.createElement('td');
-      td.colSpan=6; td.textContent='还没有记录，填上面表单提交即可';
+      td.colSpan=6; td.textContent='这个月还没有记录，填上面表单提交即可';
       td.style.cssText='text-align:center;color:#aaa;padding:30px;'; tr.appendChild(td); tbody.appendChild(tr);
     } else {
       for(var i=2;i<rows.length;i++){
@@ -239,14 +379,15 @@ A1栋24层西南玻璃门无法自动开启已上报
 
   function downloadExcel(){
     if(!wb){ newWorkbook(); }
+    refreshStyles();
     var name = curFile || '工作日志.xlsx';
+    if(!/\.xlsx$/i.test(name)) name += '.xlsx';
     XLSX.writeFile(wb, name);
-    toast('✅ 已下载 '+name);
+    toast('✅ 已下载 '+name+'（含格式）');
   }
 
-  // 初始：建个空表
+  // 初始
   newWorkbook();
-  renderTable();
 </script>
 </body>
 </html>
