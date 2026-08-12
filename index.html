@@ -182,12 +182,19 @@ A1栋24层西南玻璃门无法自动开启已上报
 
   function refreshStyles(){
     if(!wb) return;
-    wb.SheetNames.forEach(function(name){
+    // 关键修复：xlsx-js-style 读取已有文件时，对单元格创建了 {patternType:'none'}
+    // 的最小样式对象，之后直接在 cell.s.alignment 上覆盖不生效（导出后仍错）。
+    // 可靠做法：读出每个工作表的数据 → 用 aoa_to_sheet 重建 → 重新应用全部样式。
+    var names = wb.SheetNames.slice();
+    names.forEach(function(name){
       var ws = wb.Sheets[name];
-      // 先强制刷新 !ref 为当前实际内容范围，确保新追加的行被算进来
-      ws['!ref'] = XLSX.utils.encode_range(XLSX.utils.decode_range(ws['!ref'] || 'A1'));
-      var range = XLSX.utils.decode_range(ws['!ref']);
-      applySheetStyle(ws, range.e.r + 1);
+      var rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      // 跳过空表（Sheet1 之类）
+      if(!rows.length) return;
+      var newWs = XLSX.utils.aoa_to_sheet(rows);
+      applySheetStyle(newWs, rows.length);
+      // 用重建的工作表替换原表
+      wb.Sheets[name] = newWs;
     });
   }
 
