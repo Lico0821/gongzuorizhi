@@ -142,6 +142,12 @@ A1栋24层西南玻璃门无法自动开启已上报
   }
 
   function applySheetStyle(ws, totalRows){
+    // 自动用工作表实际范围确定数据行数，避免追加后行数算错
+    var endRow = totalRows;
+    if(ws['!ref']){
+      var rr = XLSX.utils.decode_range(ws['!ref']);
+      if(rr.e.r + 1 > endRow) endRow = rr.e.r + 1;
+    }
     // 标题行(第1行)
     for(var c=1;c<=6;c++){
       var cell = ws[XLSX.utils.encode_cell({r:0,c:c-1})];
@@ -152,8 +158,8 @@ A1栋24层西南玻璃门无法自动开启已上报
       var cell = ws[XLSX.utils.encode_cell({r:1,c:c-1})];
       if(cell) styleCell(cell, {fill:FILL_HEAD, font:{name:'微软雅黑',sz:10,bold:true}, align:{horizontal:'center',vertical:'center'}, border:BORDER_ALL});
     }
-    // 数据行
-    for(var r=2; r<totalRows; r++){
+    // 数据行：第4列(报修内容)靠左，其余居中 —— 全部强制覆盖，确保统一
+    for(var r=2; r<endRow; r++){
       for(var c=1;c<=6;c++){
         var cell = ws[XLSX.utils.encode_cell({r:r,c:c-1})];
         if(cell){
@@ -178,8 +184,9 @@ A1栋24层西南玻璃门无法自动开启已上报
     if(!wb) return;
     wb.SheetNames.forEach(function(name){
       var ws = wb.Sheets[name];
-      var ref = ws['!ref'] || 'A1';
-      var range = XLSX.utils.decode_range(ref);
+      // 先强制刷新 !ref 为当前实际内容范围，确保新追加的行被算进来
+      ws['!ref'] = XLSX.utils.encode_range(XLSX.utils.decode_range(ws['!ref'] || 'A1'));
+      var range = XLSX.utils.decode_range(ws['!ref']);
       applySheetStyle(ws, range.e.r + 1);
     });
   }
